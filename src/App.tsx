@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { useAudioEngine, useAnalysis, useDebugInfo } from './audio/hooks';
+import { useAudioEngine, useAnalysis, useDebugInfo, useAudioDevices, usePitchHistory } from './audio/hooks';
 import { SCALES } from './audio/types';
 import {
   PitchDisplay,
@@ -13,14 +13,27 @@ import {
   ControlPanel,
   DebugPanel,
 } from './ui/components';
+import { PitchHistory } from './ui/components/PitchHistory';
+import { DeviceSelector } from './ui/components/DeviceSelector';
+import { LatencyIndicator } from './ui/components/LatencyIndicator';
 import './App.css';
 
 const App: React.FC = () => {
   const { state, config, start, stop, updateConfig } = useAudioEngine();
   const analysis = useAnalysis();
   const debug = useDebugInfo();
+  const { history: pitchHistory, clear: clearPitchHistory } = usePitchHistory(200);
+  const {
+    inputDevices,
+    outputDevices,
+    selectedInputId,
+    selectedOutputId,
+    selectInput,
+    selectOutput,
+  } = useAudioDevices();
   
   const [showDebug, setShowDebug] = useState(false);
+  const [showDevices, setShowDevices] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   
   const handleToggle = useCallback(async () => {
@@ -28,13 +41,14 @@ const App: React.FC = () => {
       stop();
     } else {
       setIsStarting(true);
+      clearPitchHistory();
       try {
         await start();
       } finally {
         setIsStarting(false);
       }
     }
-  }, [state.isRunning, start, stop]);
+  }, [state.isRunning, start, stop, clearPitchHistory]);
   
   // Initialize scale config if needed
   const handleConfigChange = useCallback((newConfig: Parameters<typeof updateConfig>[0]) => {
@@ -56,28 +70,56 @@ const App: React.FC = () => {
           <img src="/violin.svg" alt="Violin" className="logo-icon" />
           <h1>Violin Intonation Mirror</h1>
         </div>
-        <p className="tagline">Real-time pitch detection with synthesized reference tones</p>
+        <div className="header-right">
+          {state.isRunning && state.latencyMs > 0 && (
+            <LatencyIndicator latencyMs={state.latencyMs} />
+          )}
+        </div>
       </header>
       
       <main className="app-main">
         {/* Start/Stop Button */}
         <div className="start-section">
-          <button
-            className={`start-button ${state.isRunning ? 'running' : ''}`}
-            onClick={handleToggle}
-            disabled={isStarting}
-          >
-            {isStarting ? (
-              'Starting...'
-            ) : state.isRunning ? (
-              <>
-                <span className="pulse-dot" />
-                Stop
-              </>
-            ) : (
-              'Enable Microphone & Start'
-            )}
-          </button>
+          <div className="start-row">
+            <button
+              className={`start-button ${state.isRunning ? 'running' : ''}`}
+              onClick={handleToggle}
+              disabled={isStarting}
+            >
+              {isStarting ? (
+                'Starting...'
+              ) : state.isRunning ? (
+                <>
+                  <span className="pulse-dot" />
+                  Stop
+                </>
+              ) : (
+                'Start'
+              )}
+            </button>
+            
+            <button
+              className="settings-button"
+              onClick={() => setShowDevices(!showDevices)}
+              title="Audio Devices"
+            >
+              ⚙️
+            </button>
+          </div>
+          
+          {showDevices && (
+            <div className="devices-panel">
+              <DeviceSelector
+                inputDevices={inputDevices}
+                outputDevices={outputDevices}
+                selectedInputId={selectedInputId}
+                selectedOutputId={selectedOutputId}
+                onInputChange={selectInput}
+                onOutputChange={selectOutput}
+                disabled={state.isRunning}
+              />
+            </div>
+          )}
           
           {state.error && (
             <div className="error-message">
@@ -85,9 +127,9 @@ const App: React.FC = () => {
             </div>
           )}
           
-          {!state.hasMicPermission && !state.error && (
+          {!state.hasMicPermission && !state.error && !state.isRunning && (
             <p className="permission-note">
-              Click to grant microphone access. Audio is processed locally in your browser.
+              Click Start to grant microphone access. Audio is processed locally.
             </p>
           )}
         </div>
@@ -106,6 +148,13 @@ const App: React.FC = () => {
             threshold={config.inputThreshold} 
           />
         </div>
+        
+        {/* Pitch History */}
+        {state.isRunning && (
+          <div className="history-section">
+            <PitchHistory history={pitchHistory} maxPoints={200} height={100} />
+          </div>
+        )}
         
         {/* Controls */}
         <div className="controls-section">

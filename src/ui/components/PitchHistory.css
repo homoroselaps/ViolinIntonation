@@ -1,0 +1,16 @@
+/**
+ * Pitch History Component Styles
+ */
+
+.pitch-history {
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #1a1a2e;
+  border: 1px solid #2a2a4e;
+}
+
+.pitch-history-canvas {
+  display: block;
+  width: 100%;
+}

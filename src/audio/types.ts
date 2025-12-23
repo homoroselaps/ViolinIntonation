@@ -74,12 +74,42 @@ export interface AnalysisResult {
   rmsDb: number; // dB
   gateOpen: boolean;
   timestamp: number;
+  latencyMs?: number; // Analysis latency in ms
 }
 
 export interface SpectralPeak {
   bin: number;
   frequency: number;
   magnitude: number;
+}
+
+// ============================================================================
+// Device Selection Types
+// ============================================================================
+
+export interface AudioDevice {
+  deviceId: string;
+  label: string;
+  kind: 'audioinput' | 'audiooutput';
+}
+
+export interface DeviceState {
+  inputDevices: AudioDevice[];
+  outputDevices: AudioDevice[];
+  selectedInputId: string | null;
+  selectedOutputId: string | null;
+}
+
+// ============================================================================
+// Pitch History Types
+// ============================================================================
+
+export interface PitchHistoryPoint {
+  timestamp: number;
+  frequency: number;
+  cents: number;
+  confidence: number;
+  noteName: string;
 }
 
 // ============================================================================
@@ -150,6 +180,7 @@ export interface AudioEngineState {
   hasMicPermission: boolean;
   error: string | null;
   sampleRate: number;
+  latencyMs: number; // Measured round-trip latency
 }
 
 // ============================================================================

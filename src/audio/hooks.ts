@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { AudioEngine, getAudioEngine } from './engine';
-import { AudioConfig, AudioEngineState, AnalysisResult, DebugInfo } from './types';
+import { AudioConfig, AudioEngineState, AnalysisResult, DebugInfo, AudioDevice, PitchHistoryPoint } from './types';
 
 /**
  * Hook to manage audio engine state and lifecycle
@@ -41,12 +41,12 @@ export function useAudioEngine() {
     setConfig(engineRef.current.getConfig());
   }, []);
   
-  const getInputDevices = useCallback(async () => {
-    return engineRef.current.getInputDevices();
-  }, []);
-  
   const setInputDevice = useCallback(async (deviceId: string) => {
     return engineRef.current.setInputDevice(deviceId);
+  }, []);
+  
+  const setOutputDevice = useCallback(async (deviceId: string) => {
+    return engineRef.current.setOutputDevice(deviceId);
   }, []);
   
   return {
@@ -57,8 +57,72 @@ export function useAudioEngine() {
     start,
     stop,
     updateConfig,
-    getInputDevices,
     setInputDevice,
+    setOutputDevice,
+  };
+}
+
+/**
+ * Hook to manage audio devices
+ */
+export function useAudioDevices() {
+  const engineRef = useRef<AudioEngine>(getAudioEngine());
+  const [inputDevices, setInputDevices] = useState<AudioDevice[]>([]);
+  const [outputDevices, setOutputDevices] = useState<AudioDevice[]>([]);
+  const [selectedInputId, setSelectedInputId] = useState<string | null>(null);
+  const [selectedOutputId, setSelectedOutputId] = useState<string | null>(null);
+  
+  const refreshDevices = useCallback(async () => {
+    const devices = await engineRef.current.getDevices();
+    setInputDevices(devices.inputs);
+    setOutputDevices(devices.outputs);
+    
+    // Set default selection if not set
+    if (!selectedInputId && devices.inputs.length > 0) {
+      setSelectedInputId(devices.inputs[0].deviceId);
+    }
+    if (!selectedOutputId && devices.outputs.length > 0) {
+      setSelectedOutputId(devices.outputs[0].deviceId);
+    }
+  }, [selectedInputId, selectedOutputId]);
+  
+  useEffect(() => {
+    // Initial device enumeration
+    refreshDevices();
+    
+    // Subscribe to device changes
+    const unsubscribe = engineRef.current.onDeviceChange((devices) => {
+      setInputDevices(devices.inputs);
+      setOutputDevices(devices.outputs);
+    });
+    
+    return unsubscribe;
+  }, [refreshDevices]);
+  
+  const selectInput = useCallback(async (deviceId: string) => {
+    const success = await engineRef.current.setInputDevice(deviceId);
+    if (success) {
+      setSelectedInputId(deviceId);
+    }
+    return success;
+  }, []);
+  
+  const selectOutput = useCallback(async (deviceId: string) => {
+    const success = await engineRef.current.setOutputDevice(deviceId);
+    if (success) {
+      setSelectedOutputId(deviceId);
+    }
+    return success;
+  }, []);
+  
+  return {
+    inputDevices,
+    outputDevices,
+    selectedInputId,
+    selectedOutputId,
+    selectInput,
+    selectOutput,
+    refreshDevices,
   };
 }
 
@@ -95,19 +159,23 @@ export function useDebugInfo() {
 /**
  * Hook to track average pitch over time for visualization
  */
-export function usePitchHistory(maxLength: number = 100) {
-  const [history, setHistory] = useState<{ time: number; cents: number; frequency: number }[]>([]);
+export function usePitchHistory(maxLength: number = 200) {
+  const [history, setHistory] = useState<PitchHistoryPoint[]>([]);
   const analysis = useAnalysis();
   
   useEffect(() => {
     if (analysis && analysis.pitches.length > 0 && analysis.gateOpen) {
       const pitch = analysis.pitches[0];
+      const point: PitchHistoryPoint = {
+        timestamp: analysis.timestamp,
+        frequency: pitch.frequency,
+        cents: pitch.cents,
+        confidence: pitch.confidence,
+        noteName: pitch.noteName,
+      };
+      
       setHistory(prev => {
-        const newHistory = [...prev, {
-          time: analysis.timestamp,
-          cents: pitch.cents,
-          frequency: pitch.frequency,
-        }];
+        const newHistory = [...prev, point];
         if (newHistory.length > maxLength) {
           return newHistory.slice(-maxLength);
         }

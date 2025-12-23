@@ -3,19 +3,20 @@
  * 
  * This file runs in the AudioWorklet context and handles:
  * - Ring buffer for incoming audio samples
- * - FFT analysis with peak detection and optional HPS
+ * - YIN pitch detection algorithm (better for complex tones)
  * - Synthesis oscillator bank
  * - Envelope/gate control
+ * - Latency measurement
  */
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 // DSP Constants
-const FFT_SIZE = 4096;
-const HOP_SIZE = 512;
-const MIN_FREQUENCY = 80;   // Below violin G3
-const MAX_FREQUENCY = 4000; // Above violin E6
-const HPS_HARMONICS = 3;    // Reduced for better pure tone handling
+const BUFFER_SIZE = 2048;      // Analysis buffer size
+const HOP_SIZE = 256;          // Smaller hop for lower latency
+const MIN_FREQUENCY = 80;      // Below violin G3 (~196Hz)
+const MAX_FREQUENCY = 2000;    // Above violin E6 (~1319Hz)
+const YIN_THRESHOLD = 0.15;    // YIN confidence threshold
 
 /**
  * Ring Buffer for accumulating samples for analysis
@@ -56,7 +57,133 @@ class RingBuffer {
 }
 
 /**
- * Oscillator for synthesis
+ * YIN Pitch Detection Algorithm
+ * Based on "YIN, a fundamental frequency estimator for speech and music"
+ * by Alain de Cheveigné and Hideki Kawahara
+ */
+class YINDetector {
+  constructor(bufferSize, sr) {
+    this.bufferSize = bufferSize;
+    this.halfBuffer = Math.floor(bufferSize / 2);
+    this.sampleRate = sr;
+    this.yinBuffer = new Float32Array(this.halfBuffer);
+    this.probability = 0;
+    
+    // Frequency range in terms of lag (period)
+    this.minPeriod = Math.floor(sr / MAX_FREQUENCY);
+    this.maxPeriod = Math.min(Math.floor(sr / MIN_FREQUENCY), this.halfBuffer - 1);
+  }
+  
+  /**
+   * Step 1 & 2: Compute the difference function and cumulative mean normalized difference
+   */
+  computeDifference(buffer) {
+    // Difference function
+    for (let tau = 0; tau < this.halfBuffer; tau++) {
+      this.yinBuffer[tau] = 0;
+      for (let i = 0; i < this.halfBuffer; i++) {
+        const delta = buffer[i] - buffer[i + tau];
+        this.yinBuffer[tau] += delta * delta;
+      }
+    }
+    
+    // Cumulative mean normalized difference
+    this.yinBuffer[0] = 1;
+    let runningSum = 0;
+    for (let tau = 1; tau < this.halfBuffer; tau++) {
+      runningSum += this.yinBuffer[tau];
+      this.yinBuffer[tau] *= tau / runningSum;
+    }
+  }
+  
+  /**
+   * Step 3: Absolute threshold
+   * Find the first tau where the normalized difference is below threshold
+   */
+  absoluteThreshold() {
+    let tau;
+    
+    // Search for the first minimum below threshold
+    for (tau = this.minPeriod; tau < this.maxPeriod; tau++) {
+      if (this.yinBuffer[tau] < YIN_THRESHOLD) {
+        // Found a candidate - now find the actual minimum
+        while (tau + 1 < this.maxPeriod && this.yinBuffer[tau + 1] < this.yinBuffer[tau]) {
+          tau++;
+        }
+        this.probability = 1 - this.yinBuffer[tau];
+        return tau;
+      }
+    }
+    
+    // No pitch found below threshold - find global minimum as fallback
+    let minTau = this.minPeriod;
+    let minVal = this.yinBuffer[this.minPeriod];
+    for (tau = this.minPeriod + 1; tau < this.maxPeriod; tau++) {
+      if (this.yinBuffer[tau] < minVal) {
+        minVal = this.yinBuffer[tau];
+        minTau = tau;
+      }
+    }
+    
+    this.probability = 1 - minVal;
+    return minTau;
+  }
+  
+  /**
+   * Step 4: Parabolic interpolation for sub-sample accuracy
+   */
+  parabolicInterpolation(tauEstimate) {
+    if (tauEstimate < 1 || tauEstimate >= this.halfBuffer - 1) {
+      return tauEstimate;
+    }
+    
+    const s0 = this.yinBuffer[tauEstimate - 1];
+    const s1 = this.yinBuffer[tauEstimate];
+    const s2 = this.yinBuffer[tauEstimate + 1];
+    
+    const denom = 2 * s1 - s2 - s0;
+    if (Math.abs(denom) < 1e-10) {
+      return tauEstimate;
+    }
+    
+    const adjustment = (s2 - s0) / (2 * denom);
+    
+    if (Math.abs(adjustment) < 1) {
+      return tauEstimate + adjustment;
+    }
+    return tauEstimate;
+  }
+  
+  /**
+   * Main detection function
+   */
+  detect(buffer) {
+    // Compute difference function
+    this.computeDifference(buffer);
+    
+    // Find period estimate
+    const tauEstimate = this.absoluteThreshold();
+    
+    // Refine with parabolic interpolation
+    const refinedTau = this.parabolicInterpolation(tauEstimate);
+    
+    // Convert period to frequency
+    const frequency = this.sampleRate / refinedTau;
+    
+    // Sanity check
+    if (frequency < MIN_FREQUENCY || frequency > MAX_FREQUENCY || !isFinite(frequency)) {
+      return { frequency: 0, confidence: 0 };
+    }
+    
+    return {
+      frequency: frequency,
+      confidence: Math.max(0, Math.min(1, this.probability))
+    };
+  }
+}
+
+/**
+ * Oscillator for synthesis with band-limited waveforms
  */
 class Oscillator {
   constructor(sr) {
@@ -67,8 +194,8 @@ class Oscillator {
     this.targetAmplitude = 0;
     this.waveform = 'sine';
     this.oscSampleRate = sr;
-    this.freqSmoothCoef = 0.99;  // Faster frequency tracking
-    this.ampSmoothCoef = 0.95;   // Faster amplitude response
+    this.freqSmoothCoef = 0.995;
+    this.ampSmoothCoef = 0.95;
   }
   
   setFrequency(freq) {
@@ -87,6 +214,7 @@ class Oscillator {
   }
   
   process() {
+    // Smooth frequency and amplitude
     this.frequency = this.frequency * this.freqSmoothCoef + 
                      this.targetFrequency * (1 - this.freqSmoothCoef);
     this.amplitude = this.amplitude * this.ampSmoothCoef + 
@@ -104,15 +232,25 @@ class Oscillator {
         break;
       
       case 'triangle':
-        sample = 4 * Math.abs(this.phase - 0.5) - 1;
+        // Band-limited triangle using additive synthesis
+        sample = 0;
+        const maxHarmonicTri = Math.floor(this.oscSampleRate / (2 * this.frequency));
+        for (let k = 0; k < Math.min(maxHarmonicTri, 10); k++) {
+          const n = 2 * k + 1;
+          const sign = (k % 2 === 0) ? 1 : -1;
+          sample += sign * Math.sin(2 * Math.PI * n * this.phase) / (n * n);
+        }
+        sample *= 8 / (Math.PI * Math.PI);
         break;
       
       case 'sawtooth':
+        // Band-limited sawtooth
         sample = 0;
-        for (let k = 1; k <= 8; k++) {
+        const maxHarmonicSaw = Math.floor(this.oscSampleRate / (2 * this.frequency));
+        for (let k = 1; k <= Math.min(maxHarmonicSaw, 12); k++) {
           sample += Math.sin(2 * Math.PI * k * this.phase) / k;
         }
-        sample *= 0.5;
+        sample *= 2 / Math.PI;
         break;
       
       default:
@@ -173,27 +311,23 @@ class IntonationMirrorProcessor extends AudioWorkletProcessor {
       a4Tuning: 440,
       waveformType: 'sine',
       pitchCount: 1,
-      outputLevel: 0.5,           // Increased default output
-      stabilitySmoothing: 0.7,    // Less smoothing for faster response
-      inputThreshold: -70,        // Much lower threshold for quiet inputs
-      confidenceThreshold: 0.15,  // Lower confidence threshold
-      attackTime: 10,             // Faster attack
+      outputLevel: 0.5,
+      stabilitySmoothing: 0.8,
+      inputThreshold: -60,
+      confidenceThreshold: 0.15,
+      attackTime: 10,
       releaseTime: 80,
       enableMicMonitoring: false,
     };
     
-    this.ringBuffer = new RingBuffer(FFT_SIZE * 2);
-    this.analysisBuffer = new Float32Array(FFT_SIZE);
-    this.fftReal = new Float32Array(FFT_SIZE);
-    this.fftImag = new Float32Array(FFT_SIZE);
-    this.magnitudes = new Float32Array(FFT_SIZE / 2);
+    // Ring buffer and analysis buffers
+    this.ringBuffer = new RingBuffer(BUFFER_SIZE * 2);
+    this.analysisBuffer = new Float32Array(BUFFER_SIZE);
     
-    // Pre-compute Hann window
-    this.hannWindow = new Float32Array(FFT_SIZE);
-    for (let i = 0; i < FFT_SIZE; i++) {
-      this.hannWindow[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (FFT_SIZE - 1)));
-    }
+    // YIN pitch detector
+    this.yinDetector = new YINDetector(BUFFER_SIZE, sampleRate);
     
+    // Oscillators and envelope
     this.oscillators = [
       new Oscillator(sampleRate),
       new Oscillator(sampleRate),
@@ -204,30 +338,35 @@ class IntonationMirrorProcessor extends AudioWorkletProcessor {
     this.envelope.setAttack(this.config.attackTime);
     this.envelope.setRelease(this.config.releaseTime);
     
+    // Processing state
     this.samplesSinceLastAnalysis = 0;
     this.hopCount = 0;
     
+    // Pitch smoothing
     this.smoothedPitches = [0, 0, 0];
     this.smoothedConfidences = [0, 0, 0];
     this.noteHysteresis = [0, 0, 0];
     this.lastQuantizedMidi = [0, 0, 0];
     
+    // Level metering
     this.rmsSmoothed = 0;
     this.lastGateOpen = false;
     
+    // Latency tracking
+    this.analysisLatency = 0;
+    
+    // Message handling
     this.port.onmessage = (event) => {
       if (event.data.type === 'config') {
         this.updateConfig(event.data.config);
-        console.log('[Worklet] Config updated:', event.data.config);
       }
     };
     
+    // Send ready message
     this.port.postMessage({
       type: 'ready',
       sampleRate: sampleRate,
     });
-    
-    console.log('[Worklet] Processor initialized, sampleRate:', sampleRate);
   }
   
   updateConfig(newConfig) {
@@ -245,140 +384,6 @@ class IntonationMirrorProcessor extends AudioWorkletProcessor {
         osc.setWaveform(newConfig.waveformType);
       }
     }
-  }
-  
-  computeFFT() {
-    for (let i = 0; i < FFT_SIZE; i++) {
-      this.fftReal[i] = this.analysisBuffer[i] * this.hannWindow[i];
-      this.fftImag[i] = 0;
-    }
-    
-    // Bit-reversal permutation
-    let j = 0;
-    for (let i = 0; i < FFT_SIZE - 1; i++) {
-      if (i < j) {
-        const tempR = this.fftReal[i];
-        const tempI = this.fftImag[i];
-        this.fftReal[i] = this.fftReal[j];
-        this.fftImag[i] = this.fftImag[j];
-        this.fftReal[j] = tempR;
-        this.fftImag[j] = tempI;
-      }
-      let k = FFT_SIZE >> 1;
-      while (k <= j) {
-        j -= k;
-        k >>= 1;
-      }
-      j += k;
-    }
-    
-    // Cooley-Tukey FFT
-    for (let len = 2; len <= FFT_SIZE; len <<= 1) {
-      const halfLen = len >> 1;
-      const angle = (-2 * Math.PI) / len;
-      const wReal = Math.cos(angle);
-      const wImag = Math.sin(angle);
-      
-      for (let i = 0; i < FFT_SIZE; i += len) {
-        let curReal = 1;
-        let curImag = 0;
-        
-        for (let k = 0; k < halfLen; k++) {
-          const evenIdx = i + k;
-          const oddIdx = i + k + halfLen;
-          
-          const tReal = curReal * this.fftReal[oddIdx] - curImag * this.fftImag[oddIdx];
-          const tImag = curReal * this.fftImag[oddIdx] + curImag * this.fftReal[oddIdx];
-          
-          this.fftReal[oddIdx] = this.fftReal[evenIdx] - tReal;
-          this.fftImag[oddIdx] = this.fftImag[evenIdx] - tImag;
-          this.fftReal[evenIdx] = this.fftReal[evenIdx] + tReal;
-          this.fftImag[evenIdx] = this.fftImag[evenIdx] + tImag;
-          
-          const nextReal = curReal * wReal - curImag * wImag;
-          curImag = curReal * wImag + curImag * wReal;
-          curReal = nextReal;
-        }
-      }
-    }
-    
-    // Compute magnitude spectrum
-    for (let i = 0; i < FFT_SIZE / 2; i++) {
-      this.magnitudes[i] = Math.sqrt(
-        this.fftReal[i] * this.fftReal[i] + 
-        this.fftImag[i] * this.fftImag[i]
-      );
-    }
-  }
-  
-  detectPitch() {
-    const binWidth = sampleRate / FFT_SIZE;
-    const minBin = Math.ceil(MIN_FREQUENCY / binWidth);
-    const maxBin = Math.min(
-      Math.floor(MAX_FREQUENCY / binWidth),
-      this.magnitudes.length - 1
-    );
-    
-    if (maxBin <= minBin) {
-      return { frequency: 0, confidence: 0 };
-    }
-    
-    // Calculate noise floor from lower quartile of magnitudes
-    const magSlice = this.magnitudes.slice(minBin, maxBin);
-    const sortedMags = Array.from(magSlice).sort((a, b) => a - b);
-    const noiseFloor = sortedMags[Math.floor(sortedMags.length * 0.5)] || 1e-10;
-    
-    // Find all peaks (local maxima significantly above noise)
-    const peaks = [];
-    for (let i = minBin + 1; i < maxBin - 1; i++) {
-      const mag = this.magnitudes[i];
-      // Must be a local maximum and above noise threshold
-      if (mag > this.magnitudes[i - 1] && 
-          mag > this.magnitudes[i + 1] &&
-          mag > noiseFloor * 3) {
-        peaks.push({ bin: i, mag: mag });
-      }
-    }
-    
-    if (peaks.length === 0) {
-      return { frequency: 0, confidence: 0 };
-    }
-    
-    // Sort by magnitude (strongest first)
-    peaks.sort((a, b) => b.mag - a.mag);
-    
-    // Take the strongest peak as our fundamental estimate
-    // For violin and most musical instruments, the fundamental is usually strong
-    let bestBin = peaks[0].bin;
-    let bestMag = peaks[0].mag;
-    
-    // Parabolic interpolation for sub-bin accuracy
-    let refinedBin = bestBin;
-    if (bestBin > 0 && bestBin < this.magnitudes.length - 1) {
-      const alpha = this.magnitudes[bestBin - 1];
-      const beta = this.magnitudes[bestBin];
-      const gamma = this.magnitudes[bestBin + 1];
-      const denom = alpha - 2 * beta + gamma;
-      if (Math.abs(denom) > 1e-10) {
-        const p = 0.5 * (alpha - gamma) / denom;
-        if (Math.abs(p) < 0.5) {
-          refinedBin = bestBin + p;
-        }
-      }
-    }
-    
-    const frequency = refinedBin * binWidth;
-    
-    // Sanity check
-    if (frequency < MIN_FREQUENCY || frequency > MAX_FREQUENCY) {
-      return { frequency: 0, confidence: 0 };
-    }
-    
-    // Confidence based on peak-to-noise ratio
-    const snr = bestMag / noiseFloor;
-    const confidence = Math.min(1, Math.max(0, (snr - 3) / 20));
-    
-    return { frequency, confidence };
   }
   
   frequencyToPitchInfo(freq, confidence) {
@@ -483,57 +488,56 @@ class IntonationMirrorProcessor extends AudioWorkletProcessor {
       return true;
     }
     
+    // Write input to ring buffer
     this.ringBuffer.write(inputChannel);
     this.samplesSinceLastAnalysis += inputChannel.length;
     
+    // Update RMS level
     const currentRms = this.calculateRms(inputChannel);
     this.rmsSmoothed = this.rmsSmoothed * 0.9 + currentRms * 0.1;
     
+    // Run analysis at hop intervals
     if (this.samplesSinceLastAnalysis >= HOP_SIZE) {
       this.samplesSinceLastAnalysis -= HOP_SIZE;
       this.hopCount++;
       
       if (this.ringBuffer.read(this.analysisBuffer)) {
-        this.computeFFT();
+        // Pitch detection using YIN
+        const { frequency, confidence } = this.yinDetector.detect(this.analysisBuffer);
         
-        const { frequency, confidence } = this.detectPitch();
-        
+        // Smoothing
         const alpha = this.config.stabilitySmoothing;
         
-        // Only update if we have a valid detection
         if (frequency > 0 && confidence > this.config.confidenceThreshold * 0.5) {
           const prevFreq = this.smoothedPitches[0];
-          // Accept new frequency if no previous, or if within half an octave
           if (prevFreq === 0 || Math.abs(Math.log2(frequency / prevFreq)) < 0.5) {
-            this.smoothedPitches[0] = this.smoothedPitches[0] * alpha + frequency * (1 - alpha);
-            this.smoothedConfidences[0] = this.smoothedConfidences[0] * alpha + confidence * (1 - alpha);
+            // Smooth update
+            this.smoothedPitches[0] = prevFreq === 0 ? frequency : 
+              prevFreq * alpha + frequency * (1 - alpha);
+            this.smoothedConfidences[0] = this.smoothedConfidences[0] * alpha + 
+              confidence * (1 - alpha);
           } else {
-            // Jump to new frequency if it's very different (new note)
+            // Jump to new pitch
             this.smoothedPitches[0] = frequency;
-            this.smoothedConfidences[0] = confidence * 0.5; // Start with lower confidence
+            this.smoothedConfidences[0] = confidence * 0.5;
           }
         } else {
-          // Decay both confidence and pitch when no valid detection
+          // Decay when no valid detection
           this.smoothedConfidences[0] *= 0.9;
           if (this.smoothedConfidences[0] < 0.05) {
-            this.smoothedPitches[0] = 0; // Reset pitch when confidence is very low
+            this.smoothedPitches[0] = 0;
           }
         }
         
-        // Debug: log raw detection vs smoothed
-        if (this.hopCount % 100 === 0) {
-          console.log('[Worklet] Raw detect: freq=', frequency.toFixed(1), 'conf=', confidence.toFixed(2),
-                      '| Smoothed: freq=', this.smoothedPitches[0].toFixed(1), 'conf=', this.smoothedConfidences[0].toFixed(2));
-        }
-        
+        // Calculate gate state
         const rmsDb = 20 * Math.log10(Math.max(this.rmsSmoothed, 1e-10));
         const gateOpen = rmsDb > this.config.inputThreshold && 
                         this.smoothedConfidences[0] > this.config.confidenceThreshold;
         
         this.lastGateOpen = gateOpen;
         
+        // Build pitch info for detected pitches
         const detectedPitches = [];
-        
         for (let i = 0; i < this.config.pitchCount; i++) {
           if (this.smoothedPitches[i] > 0 && this.smoothedConfidences[i] > 0.1) {
             detectedPitches.push(
@@ -542,12 +546,19 @@ class IntonationMirrorProcessor extends AudioWorkletProcessor {
           }
         }
         
+        // Calculate latency (analysis window + hop)
+        const analysisLatencyMs = (BUFFER_SIZE / sampleRate) * 1000;
+        const hopLatencyMs = (HOP_SIZE / sampleRate) * 1000;
+        this.analysisLatency = analysisLatencyMs + hopLatencyMs;
+        
+        // Create analysis result
         const analysisResult = {
           pitches: detectedPitches,
           rmsLevel: this.rmsSmoothed,
           rmsDb,
           gateOpen,
           timestamp: currentTime,
+          latencyMs: this.analysisLatency,
         };
         
         // Update oscillators
@@ -555,7 +566,6 @@ class IntonationMirrorProcessor extends AudioWorkletProcessor {
           if (i < detectedPitches.length && gateOpen) {
             const synthFreq = this.getSynthFrequency(detectedPitches[i], i);
             this.oscillators[i].setFrequency(synthFreq);
-            // Use fixed amplitude - actual volume is controlled by GainNode in main thread
             this.oscillators[i].setAmplitude(0.5 / this.config.pitchCount);
           } else {
             this.oscillators[i].setAmplitude(0);
@@ -569,28 +579,12 @@ class IntonationMirrorProcessor extends AudioWorkletProcessor {
             data: analysisResult,
           });
         }
-        
-        // Debug logging every ~2 seconds
-        if (this.hopCount % 200 === 0) {
-          const envVal = this.envelope.getValue();
-          console.log('[Worklet] rmsDb:', rmsDb.toFixed(1), 
-                      'threshold:', this.config.inputThreshold,
-                      'conf:', this.smoothedConfidences[0].toFixed(2),
-                      'confThresh:', this.config.confidenceThreshold,
-                      'gate:', gateOpen,
-                      'freq:', this.smoothedPitches[0].toFixed(1),
-                      'osc0 freq:', this.oscillators[0].frequency.toFixed(1),
-                      'osc0 targetAmp:', this.oscillators[0].targetAmplitude.toFixed(3),
-                      'osc0 amp:', this.oscillators[0].amplitude.toFixed(3),
-                      'envelope:', envVal.toFixed(3));
-        }
       }
     }
     
     // Generate synthesis output
     const outputChannel = output[0];
     if (outputChannel) {
-      let maxSample = 0;
       for (let i = 0; i < outputChannel.length; i++) {
         const env = this.envelope.process(this.lastGateOpen);
         let sample = 0;
@@ -600,19 +594,11 @@ class IntonationMirrorProcessor extends AudioWorkletProcessor {
         }
         
         outputChannel[i] = sample * env;
-        if (Math.abs(outputChannel[i]) > maxSample) {
-          maxSample = Math.abs(outputChannel[i]);
-        }
         
         // Add mic monitoring if enabled
         if (this.config.enableMicMonitoring && inputChannel) {
           outputChannel[i] += inputChannel[i] * 0.3;
         }
-      }
-      
-      // Log output level periodically
-      if (this.hopCount % 200 === 0 && maxSample > 0.001) {
-        console.log('[Worklet] Output peak:', maxSample.toFixed(4));
       }
     }
     

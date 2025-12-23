@@ -1,0 +1,48 @@
+/**
+ * Latency Indicator Component Styles
+ */
+
+.latency-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.latency-icon {
+  font-size: 0.875rem;
+}
+
+.latency-value {
+  font-weight: 600;
+}
+
+.latency-label {
+  color: inherit;
+  opacity: 0.7;
+}
+
+/* Good latency (≤50ms) */
+.latency-good {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
+
+/* Acceptable latency (≤80ms) */
+.latency-acceptable {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+/* High latency (>80ms) */
+.latency-high {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}

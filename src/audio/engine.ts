@@ -11,6 +11,7 @@ import {
   AnalysisResult,
   WorkletMessage,
   DebugInfo,
+  AudioDevice,
 } from './types';
 
 // Worklet processor URL - served from public folder
@@ -20,6 +21,7 @@ const PROCESSOR_URL = new URL('/processor.js', window.location.origin).href;
 export type AnalysisCallback = (result: AnalysisResult) => void;
 export type DebugCallback = (debug: DebugInfo) => void;
 export type StateCallback = (state: AudioEngineState) => void;
+export type DeviceCallback = (devices: { inputs: AudioDevice[], outputs: AudioDevice[] }) => void;
 
 export class AudioEngine {
   private audioContext: AudioContext | null = null;
@@ -30,10 +32,13 @@ export class AudioEngine {
   
   private config: AudioConfig;
   private state: AudioEngineState;
+  private selectedInputDeviceId: string | null = null;
+  private lastLatencyMs: number = 0;
   
   private analysisCallbacks: Set<AnalysisCallback> = new Set();
   private debugCallbacks: Set<DebugCallback> = new Set();
   private stateCallbacks: Set<StateCallback> = new Set();
+  private deviceCallbacks: Set<DeviceCallback> = new Set();
   
   constructor(initialConfig: Partial<AudioConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...initialConfig };
@@ -43,7 +48,15 @@ export class AudioEngine {
       hasMicPermission: false,
       error: null,
       sampleRate: 0,
+      latencyMs: 0,
     };
+    
+    // Listen for device changes
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices) {
+      navigator.mediaDevices.addEventListener('devicechange', () => {
+        this.refreshDevices();
+      });
+    }
   }
   
   /**
@@ -82,6 +95,55 @@ export class AudioEngine {
   onStateChange(callback: StateCallback): () => void {
     this.stateCallbacks.add(callback);
     return () => this.stateCallbacks.delete(callback);
+  }
+  
+  /**
+   * Subscribe to device list changes
+   */
+  onDeviceChange(callback: DeviceCallback): () => void {
+    this.deviceCallbacks.add(callback);
+    return () => this.deviceCallbacks.delete(callback);
+  }
+  
+  /**
+   * Refresh and notify device list
+   */
+  async refreshDevices(): Promise<void> {
+    const devices = await this.getDevices();
+    this.deviceCallbacks.forEach(cb => cb(devices));
+  }
+  
+  /**
+   * Get available audio devices
+   */
+  async getDevices(): Promise<{ inputs: AudioDevice[], outputs: AudioDevice[] }> {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs: AudioDevice[] = devices
+        .filter(d => d.kind === 'audioinput')
+        .map(d => ({
+          deviceId: d.deviceId,
+          label: d.label || `Microphone ${d.deviceId.slice(0, 8)}`,
+          kind: 'audioinput' as const,
+        }));
+      const outputs: AudioDevice[] = devices
+        .filter(d => d.kind === 'audiooutput')
+        .map(d => ({
+          deviceId: d.deviceId,
+          label: d.label || `Speaker ${d.deviceId.slice(0, 8)}`,
+          kind: 'audiooutput' as const,
+        }));
+      return { inputs, outputs };
+    } catch {
+      return { inputs: [], outputs: [] };
+    }
+  }
+  
+  /**
+   * Get selected input device ID
+   */
+  getSelectedInputDeviceId(): string | null {
+    return this.selectedInputDeviceId;
   }
   
   private updateState(partial: Partial<AudioEngineState>): void {
@@ -277,6 +339,18 @@ export class AudioEngine {
   private handleWorkletMessage(message: WorkletMessage): void {
     switch (message.type) {
       case 'analysis':
+        // Update latency from worklet measurement
+        if (message.data.latencyMs !== undefined && message.data.latencyMs !== this.lastLatencyMs) {
+          this.lastLatencyMs = message.data.latencyMs;
+          // Add approximate output buffer latency
+          const outputLatency = this.audioContext?.outputLatency 
+            ? this.audioContext.outputLatency * 1000 
+            : 5; // Fallback estimate
+          const totalLatency = Math.round(message.data.latencyMs + outputLatency);
+          if (totalLatency !== this.state.latencyMs) {
+            this.updateState({ latencyMs: totalLatency });
+          }
+        }
         this.analysisCallbacks.forEach(cb => cb(message.data));
         break;
       
@@ -363,6 +437,8 @@ export class AudioEngine {
         video: false,
       });
       
+      this.selectedInputDeviceId = deviceId;
+      
       if (wasRunning) {
         return this.start();
       }
@@ -370,6 +446,26 @@ export class AudioEngine {
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to set input device';
+      this.updateState({ error: message });
+      return false;
+    }
+  }
+  
+  /**
+   * Set output device (where supported)
+   */
+  async setOutputDevice(deviceId: string): Promise<boolean> {
+    try {
+      // Check if setSinkId is supported
+      if (this.audioContext && 'setSinkId' in this.audioContext) {
+        await (this.audioContext as any).setSinkId(deviceId);
+        return true;
+      }
+      // Fallback: not supported in all browsers
+      console.warn('setSinkId not supported in this browser');
+      return false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to set output device';
       this.updateState({ error: message });
       return false;
     }
