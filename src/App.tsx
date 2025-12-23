@@ -67,7 +67,7 @@ const App: React.FC = () => {
     <div className="app">
       <header className="app-header">
         <div className="logo">
-          <img src="/violin.svg" alt="Violin" className="logo-icon" />
+          <img src={`${import.meta.env.BASE_URL}violin.svg`} alt="Violin" className="logo-icon" />
           <h1>Violin Intonation Mirror</h1>
         </div>
         <div className="header-right">
