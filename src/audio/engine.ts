@@ -152,20 +152,23 @@ export class AudioEngine {
   }
   
   /**
-   * Request microphone permission
+   * Request microphone permission with low latency constraints
    */
   async requestMicPermission(): Promise<boolean> {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // Request low latency audio capture
+      const constraints: MediaStreamConstraints = {
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
           channelCount: 1,
           sampleRate: { ideal: 48000 },
-        },
+        } as MediaTrackConstraints,
         video: false,
-      });
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       
       // Store stream for later use
       this.mediaStream = stream;
@@ -342,13 +345,18 @@ export class AudioEngine {
         // Update latency from worklet measurement
         if (message.data.latencyMs !== undefined && message.data.latencyMs !== this.lastLatencyMs) {
           this.lastLatencyMs = message.data.latencyMs;
-          // Add approximate output buffer latency
+          // Add browser's reported latencies
+          const baseLatency = this.audioContext?.baseLatency 
+            ? this.audioContext.baseLatency * 1000 
+            : 10;
           const outputLatency = this.audioContext?.outputLatency 
             ? this.audioContext.outputLatency * 1000 
-            : 5; // Fallback estimate
-          const totalLatency = Math.round(message.data.latencyMs + outputLatency);
+            : 10;
+          const totalLatency = Math.round(message.data.latencyMs + baseLatency + outputLatency);
           if (totalLatency !== this.state.latencyMs) {
             this.updateState({ latencyMs: totalLatency });
+            // Log latency breakdown for debugging
+            console.log(`[Latency] Analysis: ${message.data.latencyMs.toFixed(1)}ms, Base: ${baseLatency.toFixed(1)}ms, Output: ${outputLatency.toFixed(1)}ms, Total: ${totalLatency}ms`);
           }
         }
         this.analysisCallbacks.forEach(cb => cb(message.data));

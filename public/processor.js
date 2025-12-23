@@ -11,10 +11,10 @@
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-// DSP Constants
-const BUFFER_SIZE = 2048;      // Analysis buffer size
-const HOP_SIZE = 256;          // Smaller hop for lower latency
-const MIN_FREQUENCY = 80;      // Below violin G3 (~196Hz)
+// DSP Constants - optimized for low latency
+const BUFFER_SIZE = 1024;      // Reduced from 2048 for lower latency (~21ms at 48kHz)
+const HOP_SIZE = 128;          // Smaller hop for faster updates
+const MIN_FREQUENCY = 150;     // Raised minimum (violin G3=196Hz) for smaller buffer
 const MAX_FREQUENCY = 2000;    // Above violin E6 (~1319Hz)
 const YIN_THRESHOLD = 0.15;    // YIN confidence threshold
 
