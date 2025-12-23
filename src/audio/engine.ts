@@ -14,9 +14,8 @@ import {
   AudioDevice,
 } from './types';
 
-// Worklet processor URL - served from public folder
-// Use absolute path from root to ensure it works in all environments
-const PROCESSOR_URL = new URL('/processor.js', window.location.origin).href;
+// Worklet processor URL - respect Vite base path (e.g., GitHub Pages)
+const PROCESSOR_URL = `${import.meta.env.BASE_URL}processor.js`;
 
 export type AnalysisCallback = (result: AnalysisResult) => void;
 export type DebugCallback = (debug: DebugInfo) => void;
