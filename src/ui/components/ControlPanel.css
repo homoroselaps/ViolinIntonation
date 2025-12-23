@@ -1,0 +1,133 @@
+.control-panel {
+  padding: 1.5rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 1px solid #2a3a5a;
+}
+
+.control-panel.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.control-panel h3 {
+  margin: 0 0 1.5rem 0;
+  font-size: 1rem;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.control-group {
+  margin-bottom: 1.25rem;
+}
+
+.control-group label {
+  display: block;
+  font-size: 0.85rem;
+  color: #8892b0;
+  margin-bottom: 0.5rem;
+}
+
+.control-group input[type="range"] {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  background: #0d1117;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.control-group input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #4ecdc4;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.control-group input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.control-group input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: #4ecdc4;
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+}
+
+.range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: #6a7a9a;
+  margin-top: 0.25rem;
+}
+
+.button-group {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.button-group button {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  background: #0d1117;
+  border: 1px solid #2a3a5a;
+  border-radius: 6px;
+  color: #8892b0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.button-group button:hover {
+  border-color: #4ecdc4;
+  color: #fff;
+}
+
+.button-group button.active {
+  background: #4ecdc4;
+  border-color: #4ecdc4;
+  color: #0d1117;
+}
+
+.button-group button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.scale-selector {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.scale-selector select {
+  flex: 1;
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  background: #0d1117;
+  border: 1px solid #2a3a5a;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.scale-selector select:focus {
+  outline: none;
+  border-color: #4ecdc4;
+}
+
+.control-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.control-group.half {
+  flex: 1;
+}

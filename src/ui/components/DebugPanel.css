@@ -1,0 +1,91 @@
+.debug-panel-container {
+  margin-top: 1rem;
+}
+
+.debug-toggle {
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  background: transparent;
+  border: 1px solid #2a3a5a;
+  border-radius: 6px;
+  color: #6a7a9a;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.debug-toggle:hover {
+  border-color: #4a5a7a;
+  color: #8892b0;
+}
+
+.debug-panel {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: rgba(13, 17, 23, 0.8);
+  border: 1px solid #2a3a5a;
+  border-radius: 8px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+}
+
+.debug-section {
+  margin-bottom: 1rem;
+}
+
+.debug-section:last-child {
+  margin-bottom: 0;
+}
+
+.debug-section h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.8rem;
+  color: #4ecdc4;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.debug-section h5 {
+  margin: 0.75rem 0 0.25rem 0;
+  font-size: 0.7rem;
+  color: #8892b0;
+}
+
+.debug-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  color: #8892b0;
+}
+
+.debug-grid span.ok {
+  color: #4ecdc4;
+}
+
+.debug-grid span.warn {
+  color: #f7d060;
+}
+
+.debug-grid span.error {
+  color: #ff6b6b;
+}
+
+.pitch-details,
+.peaks-list {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #2a3a5a;
+}
+
+.pitch-row,
+.peak-row {
+  display: flex;
+  gap: 1rem;
+  color: #8892b0;
+  padding: 0.15rem 0;
+}
+
+.pitch-row span:first-child,
+.peak-row span:first-child {
+  color: #fff;
+  min-width: 3rem;
+}

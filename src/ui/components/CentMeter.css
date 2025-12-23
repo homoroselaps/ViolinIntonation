@@ -1,0 +1,87 @@
+.cent-meter {
+  padding: 1.5rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 1px solid #2a3a5a;
+}
+
+.cent-meter.inactive {
+  opacity: 0.6;
+}
+
+.meter-label {
+  font-size: 0.85rem;
+  color: #8892b0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1rem;
+}
+
+.meter-track {
+  position: relative;
+  height: 60px;
+  background: #0d1117;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.tick.major {
+  background: #3a4a6a;
+  height: 100%;
+}
+
+.tick.minor {
+  background: #2a3a5a;
+  height: 30%;
+  top: auto;
+}
+
+.tick-label {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  color: #6a7a9a;
+  font-family: 'SF Mono', monospace;
+  white-space: nowrap;
+}
+
+.center-line {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #4ecdc4;
+  transform: translateX(-50%);
+  opacity: 0.5;
+}
+
+.needle {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 40px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  transition: left 0.05s ease-out;
+  box-shadow: 0 0 10px currentColor;
+}
+
+.cent-value {
+  font-size: 2rem;
+  font-weight: 600;
+  font-family: 'SF Mono', monospace;
+  text-align: center;
+  margin-top: 1rem;
+  transition: color 0.1s ease;
+}

@@ -1,0 +1,63 @@
+.pitch-display {
+  text-align: center;
+  padding: 2rem;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 2px solid #2a3a5a;
+  transition: all 0.2s ease;
+}
+
+.pitch-display.active {
+  border-color: #4ecdc4;
+  box-shadow: 0 0 30px rgba(78, 205, 196, 0.2);
+}
+
+.pitch-display.inactive {
+  opacity: 0.6;
+}
+
+.note-name {
+  font-size: 5rem;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(78, 205, 196, 0.5);
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+
+.pitch-display.inactive .note-name {
+  color: #666;
+  text-shadow: none;
+}
+
+.frequency-display {
+  font-size: 1.2rem;
+  color: #8892b0;
+  margin-bottom: 1rem;
+}
+
+.detected-freq {
+  font-family: 'SF Mono', monospace;
+}
+
+.reference-freq {
+  margin-left: 0.5rem;
+  color: #4ecdc4;
+  font-family: 'SF Mono', monospace;
+}
+
+.confidence-bar {
+  height: 4px;
+  background: #1a1a2e;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 1rem;
+}
+
+.confidence-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4ecdc4, #45b7d1);
+  transition: width 0.1s ease;
+  border-radius: 2px;
+}
